@@ -1,0 +1,340 @@
+---
+title: "Reproducing 'Political Science' Economist Plot"
+author: "Jafar"
+date: "2022-10-07"
+output: 
+  html_notebook:
+    toc: true
+    toc_depth: 2
+    toc_float: 
+        collapsed: false
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+# clear-up the environment
+rm(list = ls())
+
+# chunk options
+knitr::opts_chunk$set(
+  message = FALSE,
+  warning = FALSE,
+  fig.align = "center",
+  comment = "#>",
+  cache = T
+)
+
+options(scipen = 999)
+```
+
+# Background
+This is my first data visualization project that is intended to reproduce economist plot from this article [Political Science](https://www.economist.com/graphic-detail/2016/06/10/the-senates-scientific-divide). I will use one of the most used visualization package in R which is `ggplot2`. First of all, let's take a look at the economist plot that I'm talking about:
+
+```{r}
+knitr::include_graphics("plot.png")
+```
+Well, it seems a bit complicated at first, but I'm trying to do my best to resemble it.
+
+# Importing the data
+The website mentioned above, does not tell us explicitly where is the date come from which they use for creating plot. Fortunately, we can try to search the article that they was referring to and I finally found the data that we can use. Here are some of the data the might be useful for our purpose
+```{r}
+# data1 <- read.csv("neu_m0404q02m.csv")
+# data2 <- read.csv("neu_m0404q15p.csv")
+# data3 <- read.csv("neu_m0404z286.csv")
+data4 <- read.csv("politic_science.csv")
+data5 <- read.csv("S114_members.csv")
+```
+
+
+## Description of Data
+Based on that article, the data is meant to be analysed and checked if there is a correlation between follows of science-related twitter accounts by U.S Senate and recent votes on a series of amendments. This behavior will define the "sense of the Senate" on global climate change (GCC). Basically, we can quickly see from the plot above that science-related twitter accounts can reflect polarization among the Senate Democrats and Republicans which belong to distinct group. Senate Democrats are more likely to follow science-related twitter accounts than Republicans. Since our goal is to only create the plot, I will not explain more about the article. If you are interested, you can check it from this [link](https://climatechangeresponses.biomedcentral.com/articles/10.1186/s40665-016-0018-z).
+
+Actually, after inspecting some of those datasets, I realize that only the data4 and data5 will be used for creating plot. But, I will still explain what are those five data in just a simple way. Below are the brief description about each of our data:
+
+- `data1`: Column 1 shows the Senator's name, and all other columns are Twitter handles followed by at least one Senator. A 1 Indicates that the Senator's Twitter account follows that Twitter handle.
+- `data2`: A square matrix that which US Senators follow each other on Twitter (1: follow, 0: no follow).
+- `data3`: Table containing 78,000+ twitter handles followed by U.S. Senators as of February 2015. Handles are grouped in to Science (based on focus of organization), Politics, Media, and Other.
+- `data4`: Total number of Twitter accounts followed by each Senator and proportion categorized as Science, Politics, Media or Other.
+- `data5`: Table of DW-Nominate measure/score for each Senate. I actually don't really know how are these scores calculated.
+
+
+```{r eval=FALSE, echo=FALSE} 
+science <- data3[data3$Category=="Science",]
+```
+
+```{r eval=FALSE, echo=FALSE}
+valid_col <- c()
+for(i in 2:length(colnames(data1))) {
+  if(colnames(data1)[i] %in% science$Twitter.Handle){
+    valid_col <- append(valid_col, colnames(data1)[i])
+  } 
+}
+
+```
+
+
+
+
+```{r eval=FALSE, echo=FALSE}
+science_tweet <- data1[, append(valid_col, "X",0)]
+```
+
+
+
+```{r eval=FALSE, echo=FALSE}
+library(reshape2)
+melted <- melt(science_tweet,"X")
+senat_science <- data.frame(table(melted$X,melted$value))
+senat_science <- senat_science[senat_science$Var2==1,]
+senat_science
+```
+
+
+## Inspecting Data
+Remember that I'm only going to use data4 and data5, so let's have a look at them
+
+```{r}
+str(data4)
+str(data5)
+```
+
+```{r}
+head(data4)
+head(data5)
+```
+From the data5, we only care about the nominate_dim1 column since this is going to be our x-axis value.
+
+
+## Cleaning Data
+We can see from the result above that there is a different amount of row between data4 and data5, so we need to match both dataframe so they contain the exact same Senate.
+```{r}
+nominate <- subset(data5, grepl(paste(data4$Last.Name, collapse="|"), data5$bioname, ignore.case = T), select = c("bioname","nominate_dim1"))
+head(nominate)
+```
+
+Remember that the data4 contains only the last name, whereas the data5 contains full name. Here I want to split the fullname and take only the last name. We can see from the bioname column, the last nama is located before comma, so we can try to extract it and make a new column containing that last name using below code.
+```{r}
+library(dplyr)
+nominate_clean <- nominate %>% 
+  mutate(name = sapply(strsplit(nominate$bioname, ","), head, 1))
+head(nominate_clean)
+```
+
+Next, we want to match the exact character regardless of what case is being used(upper or lower), so we lowercase both column
+```{r}
+data4$Last.Name <- tolower(data4$Last.Name)
+nominate_clean$name <- tolower(nominate_clean$name)
+```
+
+
+Finally, we will join these two dataframes into one dataframe so we can use it for our plotting.
+```{r}
+clean_data <- data4 %>% 
+  left_join(nominate_clean, by = c("Last.Name" = "name"))
+clean_data$Science <- clean_data$Science*100
+clean_data$Party <- factor(clean_data$Party, levels = c("D","R","I"))
+head(clean_data)
+```
+
+# Recreating the Plot
+Before I create the plot, I want to exclude the senat who don't actually follow science-related account and take the senat who follow less than 7000 account. The decision was based on what I have seen from the real plot.
+```{r}
+clean_data <- clean_data[clean_data$Total <= 7000 ,]
+clean_data <- clean_data[clean_data$Science > 0,]
+```
+
+## Import Library
+I try to reproduce the exact same plot even the font style, so I found some fonts online that hopefully would help us making our plot looks 'economist'
+```{r}
+library(showtext)
+font.add("ITC Officina Book", "itc-officina-sans-std-book.otf")
+font.add("ITC Officina Book Italic", "itc-officina-sans-std-book-italic.otf")
+font.add("ITC Officina Bold","itc-officina-sans-std-bold.otf")
+font.add("ITC Officina Bold Italic", "itc-officina-sans-std-bold-italic.otf")
+showtext_auto()
+```
+
+Now, let's also import the real packages that we're going to use as our main purpose
+```{r}
+library(ggplot2)
+library(ggthemes)
+library(scales)
+```
+
+
+Next, we want to only visualize certain senat names based on the real plot
+```{r}
+text_label <- c("markey","reid","cochran","sanders","schatz","vitter","inhofe")
+data_label <- clean_data[clean_data$Last.Name %in% text_label,]
+data_label$Full.Name <- c("Thad Cochran", "Jim Inhofe","Ed Markey","Harry Reid","Bernie Sanders", "Brian Schatz","David Vitter" )
+```
+
+Here we want to set the theme for our plot as similar as possible to our reference. This actually requires several attempts, so I am sorry if the final result does not satisfy you.
+```{r}
+theme_pol <- theme(
+    #aspect.ratio = 3/6,
+    plot.title = element_text(size=14, family="ITC Officina Bold", 
+                              color="black",
+                              hjust=-0.075, 
+                              vjust = -5),
+    plot.subtitle = element_text(size=10, family="ITC Officina Book", 
+                                 color="black", 
+                                 hjust = -0.155, 
+                                 vjust = -8.2),
+    #plot.margin = unit(c(0, 0, 2, 0), units="line"),
+    panel.border = element_blank(),
+    panel.grid.major.x= element_blank(),
+    panel.grid.minor.x = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    panel.grid.major.y = element_blank(),#element_line(size=.6,color = "grey66"),
+    plot.background = element_rect(fill = "#FFFFFF"),
+    panel.background = element_rect(fill = "#FFFFFF"),
+    #axis.line.x = element_line(color="black"),
+    axis.title.y = element_text(size = 10, 
+                                family="ITC Officina Book Italic", 
+                                colour = "black", 
+                                hjust = -1.3),
+    axis.title.x = element_text(size = 10, 
+                                family="ITC Officina Bold Italic", 
+                                colour = "#696969"),
+    axis.text = element_text(size=10, 
+                             family = "ITC Officina Book", 
+                             color="black"),
+    axis.ticks.length.x = unit(-0.2, "lines"),
+    legend.position = c(-0.07,0.88),
+    legend.direction = "horizontal",
+    legend.justification = "left",
+    legend.text = element_text(size=10, 
+                               family = "ITC Officina Book", 
+                               color="black"),
+    legend.title = element_text(size=10, 
+                                family="ITC Officina Bold", 
+                                color="black", 
+                                margin = margin(r=8)),
+    legend.background = element_blank(),
+    legend.key=element_blank(),
+    legend.spacing.x = unit(c(-0.1), "cm")
+  ) 
+
+```
+
+
+Our plot includes point and text, so let's do that using ggplot. We also need to specify the plot title, axis, scale, and legend so it matches the actual plot.
+```{r}
+gg <- ggplot(data = clean_data, aes(x=nominate_dim1,y=Science)) + 
+  geom_point(aes(color=Party, size=Total), alpha=0.5) +
+  geom_text(
+    data=data_label ,
+    aes(label=Full.Name,color=Party), 
+    nudge_x = 0.15,
+    nudge_y = 0.2,
+    family = "ITC Officina Bold Italic",
+    show.legend = F
+  ) +
+  scale_x_continuous(labels = c("1.0","0.5","0","0.5","1.0")) +
+  scale_y_continuous(trans=log2_trans(),breaks=c(0.5,1.0,2.0,4.0,6.0,8.0,10.0)) +
+  scale_size(range = c(1,20), guide="none") +
+  scale_color_manual(
+    values = c("#8dd4f0","#f48872","#4f9588"),
+    guide = guide_legend(title="Party affiliation:"), 
+            labels= c("D"="Democrats","R"="Republicans","I"="Independents")               
+  ) +
+  coord_cartesian(xlim=c(-1,1), clip = 'off') +
+  labs(
+    title = "Political Science", 
+    subtitle = "United States senator's political ideology and scientific engagement on Twitter*",
+    x = "Liberal-Conservative Score",
+    y = "Science-related Twitter accounts followed, % of total, natural log scale"
+  ) +
+  theme_bw() 
+
+```
+
+
+Next,we want to create additional text and the minus(-) plus(+) sign for for the x-axis. I actually tried to find the most efficient way, and end up finding this approach
+```{r}
+library(grid)
+grob = grobTree(textGrob("February 2015", x=-0.06, y=1, hjust=0, vjust=4, gp=gpar(fontsize=8, fontfamily="ITC Officina Book", col="black")))
+grob2 = grobTree(textGrob("-                               +", x=0.37, y=-0.04, hjust=0, vjust=0.4, gp=gpar(fontsize=15, fontfamily="ITC Officina Book", col="black")))
+grob3 = grobTree(textGrob("MORE LIBERAL", x=0.05, y=1, hjust=0, vjust=56, gp=gpar(fontsize=8, fontfamily="ITC Officina Bold Italic", col="#8dd4f0")))
+grob4 = grobTree(textGrob("MORE CONSERVATIVE", x=0.8, y=1, hjust=0, vjust=56, gp=gpar(fontsize=8, fontfamily="ITC Officina Bold Italic", col="#4f9588")))
+```
+
+
+Now, we should create the coecentric circles instead of the native legend. I don't know how to customize that if I only use the basic native legend provided by ggplot, so I found that this way would be an option. Besides that, we also need to create customized grid since as we can see from the actual plot the two grids at the top are cut.
+```{r}
+legend_bbl <- data.frame(label=c("250","1,000","5,000"),
+                         size=c(250,1000,5000),
+                         pos_bbl=c(8.7,9.5,12),  #c(7.7,8.5,11),
+                         pos_txt=c(8.9,12.9,21))
+line_segment <- data.frame(xend=c(0.7,0.7,1,1,1,1,1,1),
+                           y=c(10,8,6,4,2,1,0.5,0)
+                           )
+dash_segment <- data.frame(y=c(9.8,11.9,19.2))
+```
+
+
+Lets add that into our plot
+```{r}
+final <- gg + 
+  geom_point(
+    data=legend_bbl,
+    aes(x=0.84, y=pos_bbl, size=size),
+    shape = 21, color = "black", fill = "#e1e3e5",alpha=0.5
+  )+
+  geom_text(
+    data=legend_bbl,
+    aes(x=1,y=pos_txt,label=label),
+    hjust=1,
+    size=3
+  )+
+  
+  
+  geom_segment(data=line_segment,
+               aes(x=-1.1,xend=xend,y=y,yend=y),color="grey66")+
+  geom_segment(data = dash_segment,
+               aes(x=0.83, xend=1, y=y,yend=y),linetype="dotted") +
+  annotation_custom(grob) +
+  annotation_custom(grob2) +
+  annotation_custom(grob3) +
+  annotation_custom(grob4) +
+
+  annotate("text", x = 0.75 , y = 30, label = "Twitter accounts \nfollowed, total", fontface = "bold", family = "ITC Officina Bold",lineheight = 0.6, hjust=0 ) +
+  theme_pol
+  
+
+final
+  # annotate("text", x = 0.8, y = 30, label = stringr::str_wrap(
+  #   "Twitter accounts followed, total",
+  #    width = 20), fontface = "bold", family = "ITC Officina Bold" ) 
+#ggsave("new.png", height = 3, width =6, dpi = 200)
+library(ggpubr)
+ggexport(final, filename = "baru.pdf")
+```
+I know that the result does not exactly look like the original one, probably because there is a little difference between the dataset that I use from the economist plot reference. However, at least we have got a quite similar plot even though it still far from perfect.
+
+
+# References
+- <http://www.cookbook-r.com/Graphs/Axes_(ggplot2)/>
+- <https://stackoverflow.com/questions/9520840/using-regexp-to-select-rows-in-r-dataframe>
+- <https://stackoverflow.com/questions/7597559/grep-using-a-character-vector-with-multiple-patterns>
+- <https://stackoverflow.com/questions/60621254/r-vlookup-based-on-partial-string-matches-in-r>
+- <https://stackoverflow.com/questions/33683862/first-entry-from-string-split>
+- <https://www.datanovia.com/en/blog/how-to-create-a-bubble-chart-in-r-using-ggplot2/>
+- <https://stackoverflow.com/questions/43770579/how-to-change-the-color-in-geom-point-or-lines-in-ggplot>
+- <https://ggplot2-book.org/scale-position.html#scale-transformation>
+- <http://www.cookbook-r.com/Graphs/Axes_(ggplot2)/>
+- <https://stackoverflow.com/questions/9690648/avoid-clipping-of-points-along-axis-in-ggplot>
+- <https://www.statology.org/geom_point-fill/>
+- <https://stackoverflow.com/questions/35833307/ggplot2-axis-not-showing-after-using-themeaxis-line-element-line>
+- <https://stackoverflow.com/questions/52612867/create-a-concentric-circle-legend-for-a-ggplot-bubble-chart>
+- <https://stackoverflow.com/questions/25106508/ggplot2-is-there-an-easy-way-to-wrap-annotation-text>
+- <https://rdrr.io/cran/ggthemes/man/theme_economist.html>
+- <https://stackoverflow.com/questions/11714951/remove-extra-legends-in-ggplot2>
+- <https://github.com/joshua0308/transify/tree/master/font>
+- <http://www.cookbook-r.com/Graphs/Legends_(ggplot2)/>
+- <https://stackoverflow.com/questions/15392570/set-length-of-geom-hline-in-geom-bar-plot>
+- <https://stackoverflow.com/questions/32505298/explain-ggplot2-warning-removed-k-rows-containing-missing-values>
+- <https://stackoverflow.com/questions/16074440/r-ggplot2-center-align-a-multi-line-title>
+- <https://stackoverflow.com/questions/14604435/turning-off-some-legends-in-a-ggplot>
+- <https://stackoverflow.com/questions/26367296/how-do-i-make-my-axis-ticks-face-inwards-in-ggplot2>
